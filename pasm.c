@@ -163,7 +163,7 @@ int default_shdrtabs_x86_64(elf64_obj_t *obj)
 {
     Elf64_Shdr shdr_null, shdr_text, shdr_data, shdr_bss,
                shdr_symtab, shdr_strtab, shdr_shstrtab;
-    size_t sh_offset;
+    size_t sh_offset, strtab_len;
     sh_offset = sizeof(Elf64_Ehdr);
 
     shdr_null = (Elf64_Shdr){};
@@ -200,9 +200,14 @@ int default_shdrtabs_x86_64(elf64_obj_t *obj)
     };
     sh_offset += shdr_symtab.sh_size;
 
+    strtab_len = 1;
+    for (int i = 0; i < obj->strtab_count; i++) {
+        strtab_len += strlen(obj->strtab[i]) + 1;
+    }
+
     shdr_strtab = (Elf64_Shdr){
         .sh_name = 0x09, .sh_type = SHT_STRTAB, .sh_flags = 0, .sh_addr = 0,
-        .sh_offset = sh_offset, .sh_size = sizeof(strtab) - 1, .sh_link = 0,
+        .sh_offset = sh_offset, .sh_size = strtab_len, .sh_link = 0,
         .sh_info = 0, .sh_addralign = 1, .sh_entsize = 0
     };
     sh_offset += shdr_strtab.sh_size;
