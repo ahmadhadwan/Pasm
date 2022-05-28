@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU General Public License along
  * with this program; See COPYING file for copyright and license details.
  */
+#include <ctype.h>
 #include <elf.h>
 #include <string.h>
 #include <stdint.h>
@@ -23,6 +24,9 @@
 #include <sys/stat.h>
 
 #define OUTFILE_DEFAULT "a.out"
+
+/* enums */
+enum { UNKNOWN, INS, LABEL, DIRECTIVE, CONSTANT, REGISTER, COMMA };
 
 /* structs */
 typedef struct {
@@ -38,14 +42,21 @@ typedef struct {
 } elf64_obj_t;
 
 typedef struct {
-    const char *mnemonic;
-    uint8_t    *bytes;
-} ins_t;
+    int    type;
+    int    len;
+    size_t start;
+} token_t;
+
+typedef struct {
+    char  *src;
+    size_t i;
+} unit_t;
 
 /* function declarations */
 static int assemble_file(char *filename, char *outfile);
-static int assemble_x86_64(char *src, int srclen, char *outfile);
-static uint8_t *generate_code_x86_64(char *src, int srclen, size_t *assembly_size);
+static int assemble_x86_64(char *src, char *outfile);
+static int lex(unit_t *unit, token_t *token);
+static int parse_x86_64(unit_t *unit, elf64_obj_t *obj);
 static void usage();
 
 /* variables */
@@ -83,13 +94,13 @@ int assemble_file(char *filename, char *outfile)
     fread(src, sizeof(char), filestat.st_size, fd);
     fclose(fd);
 
-    return_value = assemble_x86_64(src, filestat.st_size, outfile);
+    return_value = assemble_x86_64(src, outfile);
 
     free(src);
     return return_value;
 }
 
-int assemble_x86_64(char *src, int srclen, char *outfile)
+int assemble_x86_64(char *src, char *outfile)
 {
     elf64_obj_t obj;
     Elf64_Ehdr ehdr;
@@ -97,37 +108,32 @@ int assemble_x86_64(char *src, int srclen, char *outfile)
     Elf64_Shdr shdr_null, shdr_text, shdr_data, shdr_bss, shdr_symtab,
                shdr_strtab, shdr_shstrtab;
 
+    unit_t unit;
     size_t sh_offset;
 
     uint8_t *raw_obj;
     size_t raw_obj_len;
     FILE *fd;
 
-    obj.assembly = generate_code_x86_64(src, srclen, &(obj.assembly_size));
+    unit.src = src;
+    unit.i = 0;
+    obj = (elf64_obj_t){};
+
+    if (parse_x86_64(&unit, &obj)) {
+        return 1;
+    }
 
     ehdr = (Elf64_Ehdr){
-        .e_ident[EI_MAG0] = ELFMAG0,
-        .e_ident[EI_MAG1] = ELFMAG1,
-        .e_ident[EI_MAG2] = ELFMAG2,
-        .e_ident[EI_MAG3] = ELFMAG3,
-        .e_ident[EI_CLASS] = ELFCLASS64,
-        .e_ident[EI_DATA] = ELFDATA2LSB,
-        .e_ident[EI_VERSION] = EV_CURRENT,
-        .e_ident[EI_OSABI] = ELFOSABI_SYSV,
+        .e_ident[EI_MAG0] = ELFMAG0, .e_ident[EI_MAG1] = ELFMAG1,
+        .e_ident[EI_MAG2] = ELFMAG2, .e_ident[EI_MAG3] = ELFMAG3,
+        .e_ident[EI_CLASS] = ELFCLASS64, .e_ident[EI_DATA] = ELFDATA2LSB,
+        .e_ident[EI_VERSION] = EV_CURRENT, .e_ident[EI_OSABI] = ELFOSABI_SYSV,
         .e_ident[EI_ABIVERSION] = 0,
         .e_type = ET_REL, /* Object File | TODO: add executables support later */
-        .e_machine = EM_X86_64,
-        .e_version = EV_CURRENT,
-        .e_entry = 0,
-        .e_phoff = 0,
-        .e_shoff = 240 + obj.assembly_size,
-        .e_flags = 0,
-        .e_ehsize = sizeof(Elf64_Ehdr),
-        .e_phentsize = 0,
-        .e_phnum = 0,
-        .e_shentsize = 64,
-        .e_shnum = 7,
-        .e_shstrndx = 6
+        .e_machine = EM_X86_64, .e_version = EV_CURRENT, .e_entry = 0,
+        .e_phoff = 0, .e_shoff = 240 + obj.assembly_size, .e_flags = 0,
+        .e_ehsize = sizeof(Elf64_Ehdr), .e_phentsize = 0, .e_phnum = 0,
+        .e_shentsize = 64, .e_shnum = 7, .e_shstrndx = 6
     };
 
     obj.ehdr = &ehdr;
@@ -135,39 +141,24 @@ int assemble_x86_64(char *src, int srclen, char *outfile)
     sym_null = (Elf64_Sym){};
 
     sym_text = (Elf64_Sym){
-        .st_name = 0,
-        .st_info = ELF64_ST_INFO(STB_LOCAL, STT_SECTION),
-        .st_other = STV_DEFAULT,
-        .st_shndx = 1,
-        .st_value = 0,
-        .st_size = 0
+        .st_name = 0, .st_info = ELF64_ST_INFO(STB_LOCAL, STT_SECTION),
+        .st_other = STV_DEFAULT, .st_shndx = 1, .st_value = 0, .st_size = 0
     };
 
     sym_data = (Elf64_Sym){
-        .st_name = 0,
-        .st_info = ELF64_ST_INFO(STB_LOCAL, STT_SECTION),
-        .st_other = STV_DEFAULT,
-        .st_shndx = 2,
-        .st_value = 0,
-        .st_size = 0
+        .st_name = 0, .st_info = ELF64_ST_INFO(STB_LOCAL, STT_SECTION),
+        .st_other = STV_DEFAULT, .st_shndx = 2, .st_value = 0, .st_size = 0
     };
 
     sym_bss = (Elf64_Sym){
-        .st_name = 0,
-        .st_info = ELF64_ST_INFO(STB_LOCAL, STT_SECTION),
-        .st_other = STV_DEFAULT,
-        .st_shndx = 3,
-        .st_value = 0,
-        .st_size = 0
+        .st_name = 0, .st_info = ELF64_ST_INFO(STB_LOCAL, STT_SECTION),
+        .st_other = STV_DEFAULT, .st_shndx = 3, .st_value = 0, .st_size = 0
     };
 
     sym_start = (Elf64_Sym){
-        .st_name = 0x01,
-        .st_info = ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), /* STB_GLOBAL & .symtab info - 1 = .globl {label} */
-        .st_other = STV_DEFAULT,
-        .st_shndx = 1,
-        .st_value = 0,
-        .st_size = 0
+        .st_name = 0x01, .st_info = ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE),
+            /* STB_GLOBAL & .symtab info - 1 = .globl {label} */
+        .st_other = STV_DEFAULT, .st_shndx = 1, .st_value = 0, .st_size = 0
     };
 
     sh_offset = sizeof(Elf64_Ehdr);
@@ -175,86 +166,48 @@ int assemble_x86_64(char *src, int srclen, char *outfile)
     shdr_null = (Elf64_Shdr){};
 
     shdr_text = (Elf64_Shdr){
-        .sh_name = 0x1b,
-        .sh_type = SHT_PROGBITS,
-        .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
-        .sh_addr = 0,
-        .sh_offset = sh_offset,
-        .sh_size = obj.assembly_size,
-        .sh_link = 0,
-        .sh_info = 0,
-        .sh_addralign = 1,
-        .sh_entsize = 0
+        .sh_name = 0x1b, .sh_type = SHT_PROGBITS,
+        .sh_flags = SHF_ALLOC | SHF_EXECINSTR, .sh_addr = 0,
+        .sh_offset = sh_offset, .sh_size = obj.assembly_size, .sh_link = 0,
+        .sh_info = 0, .sh_addralign = 1, .sh_entsize = 0
     };
     sh_offset += shdr_text.sh_size;
 
     shdr_data = (Elf64_Shdr){
-        .sh_name = 0x21,
-        .sh_type = SHT_PROGBITS,
-        .sh_flags = SHF_ALLOC | SHF_WRITE,
-        .sh_addr = 0,
-        .sh_offset = sh_offset,
-        .sh_size = 0x0,
-        .sh_link = 0,
-        .sh_info = 0,
-        .sh_addralign = 1,
-        .sh_entsize = 0
+        .sh_name = 0x21, .sh_type = SHT_PROGBITS,
+        .sh_flags = SHF_ALLOC | SHF_WRITE, .sh_addr = 0,
+        .sh_offset = sh_offset, .sh_size = 0x0, .sh_link = 0, .sh_info = 0,
+        .sh_addralign = 1, .sh_entsize = 0
     };
     sh_offset += shdr_data.sh_size;
 
     shdr_bss = (Elf64_Shdr){
-        .sh_name = 0x27,
-        .sh_type = SHT_NOBITS,
-        .sh_flags = SHF_ALLOC | SHF_WRITE,
-        .sh_addr = 0,
-        .sh_offset = sh_offset,
-        .sh_size = 0x0,
-        .sh_link = 0,
-        .sh_info = 0,
-        .sh_addralign = 1,
-        .sh_entsize = 0
+        .sh_name = 0x27, .sh_type = SHT_NOBITS,
+        .sh_flags = SHF_ALLOC | SHF_WRITE, .sh_addr = 0,
+        .sh_offset = sh_offset, .sh_size = 0x0, .sh_link = 0, .sh_info = 0,
+        .sh_addralign = 1, .sh_entsize = 0
     };
     sh_offset += shdr_bss.sh_size;
 
     shdr_symtab = (Elf64_Shdr){
-        .sh_name = 0x01,
-        .sh_type = SHT_SYMTAB,
-        .sh_flags = 0,
-        .sh_addr = 0,
-        .sh_offset = sh_offset,
-        .sh_size = sizeof(Elf64_Sym) * 5,
-        .sh_link = 5,
-        .sh_info = 4,
-        .sh_addralign = 8,
-        .sh_entsize = 0x18
+        .sh_name = 0x01, .sh_type = SHT_SYMTAB, .sh_flags = 0, .sh_addr = 0,
+        .sh_offset = sh_offset, .sh_size = sizeof(Elf64_Sym) * 5, .sh_link = 5,
+        .sh_info = 4, .sh_addralign = 8, .sh_entsize = 0x18
     };
     sh_offset += shdr_symtab.sh_size;
 
     shdr_strtab = (Elf64_Shdr){
-        .sh_name = 0x09,
-        .sh_type = SHT_STRTAB,
-        .sh_flags = 0,
-        .sh_addr = 0,
-        .sh_offset = sh_offset,
-        .sh_size = sizeof(strtab) - 1,
-        .sh_link = 0,
-        .sh_info = 0,
-        .sh_addralign = 1,
-        .sh_entsize = 0
+        .sh_name = 0x09, .sh_type = SHT_STRTAB, .sh_flags = 0, .sh_addr = 0,
+        .sh_offset = sh_offset, .sh_size = sizeof(strtab) - 1, .sh_link = 0,
+        .sh_info = 0, .sh_addralign = 1, .sh_entsize = 0
     };
     sh_offset += shdr_strtab.sh_size;
 
     shdr_shstrtab = (Elf64_Shdr){
-        .sh_name = 0x11,
-        .sh_type = SHT_STRTAB,
-        .sh_flags = 0,
-        .sh_addr = 0,
-        .sh_offset = sh_offset,
+        .sh_name = 0x11, .sh_type = SHT_STRTAB, .sh_flags = 0,
+        .sh_addr = 0, .sh_offset = sh_offset,
         .sh_size = sizeof(shstrtab) - 1 -4/* the padded zeros */,
-        .sh_link = 0,
-        .sh_info = 0,
-        .sh_addralign = 1,
-        .sh_entsize = 0
+        .sh_link = 0, .sh_info = 0, .sh_addralign = 1, .sh_entsize = 0
     };
     sh_offset += shdr_shstrtab.sh_size;
 
@@ -268,9 +221,13 @@ int assemble_x86_64(char *src, int srclen, char *outfile)
     raw_obj_len = 0;
     memcpy(raw_obj, obj.ehdr, sizeof(Elf64_Ehdr));
     raw_obj_len += sizeof(Elf64_Ehdr);
-    memcpy(raw_obj + raw_obj_len, obj.assembly, obj.assembly_size);
-    raw_obj_len += obj.assembly_size;
-    free(obj.assembly);
+
+    if (obj.assembly) {
+        memcpy(raw_obj + raw_obj_len, obj.assembly, obj.assembly_size);
+        raw_obj_len += obj.assembly_size;
+        free(obj.assembly);
+    }
+
     memcpy(raw_obj + raw_obj_len, &sym_null, sizeof(Elf64_Sym));
     raw_obj_len += sizeof(Elf64_Sym);
     memcpy(raw_obj + raw_obj_len, &sym_text, sizeof(Elf64_Sym));
@@ -281,8 +238,10 @@ int assemble_x86_64(char *src, int srclen, char *outfile)
     raw_obj_len += sizeof(Elf64_Sym);
     memcpy(raw_obj + raw_obj_len, &sym_start, sizeof(Elf64_Sym));
     raw_obj_len += sizeof(Elf64_Sym);
+
     memcpy(raw_obj + raw_obj_len, strtab, sizeof(strtab) - 1);
     raw_obj_len += sizeof(strtab) - 1;
+
     memcpy(raw_obj + raw_obj_len, shstrtab, sizeof(shstrtab) - 1);
     raw_obj_len += sizeof(shstrtab) - 1;
     memcpy(raw_obj + raw_obj_len, &shdr_null, sizeof(Elf64_Shdr));
@@ -308,18 +267,78 @@ int assemble_x86_64(char *src, int srclen, char *outfile)
     return 0;
 }
 
-uint8_t *generate_code_x86_64(char *src, int srclen, size_t *assembly_size)
+int lex(unit_t *unit, token_t *token)
 {
-    uint8_t *assembly = NULL;
-    size_t len = 0;
+    token->type = UNKNOWN;
+
+    do {
+        while (isspace(unit->src[unit->i])) {
+            unit->i++;
+        }
+
+        if (unit->src[unit->i] == ';') {
+            do {
+                unit->i++;
+            } while (unit->src[unit->i] != '\n' && unit->src[unit->i] != '\0');
+        }
+    } while (isspace(unit->src[unit->i]));
+
+    token->start = unit->i;
+    token->len = 0;
+
+    if (unit->src[unit->i] == '.') {
+        unit->i++;
+    }
+    else if (unit->src[unit->i] == '_' || isalpha(unit->src[unit->i])) {
+        unit->i++;
+        while (unit->src[unit->i] == '_' || isalnum(unit->src[unit->i])) {
+            unit->i++;
+        }
+
+        if (unit->src[unit->i] == ':') {
+            token->type = LABEL;
+            token->len = unit->i - token->start;
+            unit->i++;
+        }
+    }
+    else if (unit->src[unit->i] == '\0') {
+        return 1;
+    }
+    else {
+        fprintf(stderr, "Invalid character `%c` in mnemonic.\n", unit->src[unit->i]);
+        return 1;
+    }
+
+    return 0;
+}
+
+int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
+{
+    token_t token;
+    char *buff;
+
+    while (!lex(unit, &token)) {
+        buff = malloc(token.len + 1);
+        memcpy(buff, unit->src + token.start, token.len);
+        buff[token.len] = '\0';
+
+        printf("token: type=%d, text=%s\n", token.type, buff);
+
+        switch (token.type)
+        {
+        case LABEL:
+            break;
+        }
+
+        free(buff);
+    }
 
     /* temp */
-    /*assembly = malloc(exit_assembly_len);*/
-    /*memcpy(assembly, exit_assembly, exit_assembly_len);*/
-    /*len = exit_assembly_len;*/
+    obj->assembly = malloc(exit_assembly_len);
+    memcpy(obj->assembly, exit_assembly, exit_assembly_len);
+    obj->assembly_size = exit_assembly_len;
 
-    *assembly_size = len;
-    return assembly;
+    return 0;
 }
 
 void usage()
