@@ -1,0 +1,4 @@
+*.o
+pasm
+pasm_out
+gas_out
