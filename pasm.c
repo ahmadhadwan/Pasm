@@ -26,7 +26,8 @@
 #define OUTFILE_DEFAULT "a.out"
 
 /* enums */
-enum { UNKNOWN, INS, LABEL, DIRECTIVE, CONSTANT, REGISTER, COMMA };
+enum { ID, LABEL, DIRECTIVE, CONSTANT, REGISTER, COMMA,
+       NEWLINE, ENDOFFILE, TYPES_COUNT };
 
 /* structs */
 typedef struct {
@@ -62,7 +63,10 @@ static int assemble_x86_64(char *src, char *outfile);
 static int default_shdrtabs_x86_64(elf64_obj_t *obj);
 static int default_symtabs_x86_64(elf64_obj_t *obj);
 static int lex(unit_t *unit, token_t *token);
+static int lex_constant(unit_t *unit, token_t *token);
+static int lex_id(unit_t *unit, token_t *token);
 static int parse_x86_64(unit_t *unit, elf64_obj_t *obj);
+static void skip_comments(unit_t *unit);
 static void usage();
 static int write_file_x86_64(char *outfile, elf64_obj_t *obj);
 
@@ -75,6 +79,10 @@ static uint8_t exit_assembly[] = {
     0x0F, 0x05
 };
 static const size_t exit_assembly_len = 16;
+static const char *token_types[TYPES_COUNT] = {
+    "Identifier", "Label", "Directive", "Constant", "Register", "Comma",
+    "NewLine", "EndOfFile"
+};
 
 /* function implementations */
 int assemble_file(char *filename, char *outfile)
@@ -266,46 +274,74 @@ int default_symtabs_x86_64(elf64_obj_t *obj)
 
 int lex(unit_t *unit, token_t *token)
 {
-    token->type = UNKNOWN;
+    char c;
+    int return_value;
 
-    do {
-        while (isspace(unit->src[unit->i])) {
-            unit->i++;
-        }
-
-        if (unit->src[unit->i] == ';') {
-            do {
-                unit->i++;
-            } while (unit->src[unit->i] != '\n' && unit->src[unit->i] != '\0');
-        }
-    } while (isspace(unit->src[unit->i]));
-
-    token->start = unit->i;
-    token->len = 0;
-
-    if (unit->src[unit->i] == '.') {
+    /* Skip Whitespace */
+    while (isblank(unit->src[unit->i])) {
         unit->i++;
     }
-    else if (unit->src[unit->i] == '_' || isalpha(unit->src[unit->i])) {
+
+    skip_comments(unit);
+
+    c = unit->src[unit->i];
+    return_value = 0;
+
+    switch (c)
+    {
+        case '$': return lex_constant(unit, token);
+        case '%':
+            unit->i++;
+            return_value = lex_id(unit, token);
+            token->type = REGISTER;
+            break;
+        case '\n':
+            token->type = NEWLINE;
+            token->start = unit->i;
+            unit->i++;
+            token->len = 1;
+            break;
+        case '\0':
+            token->type = ENDOFFILE;
+            token->start = unit->i;
+            token->len = 1;
+            break;
+        default:
+            if (c == '.' || c == '_' || isalpha(c)) {
+                return_value = lex_id(unit, token);
+                if (unit->src[unit->i] == ':') {
+                    token->type = LABEL;
+                    unit->i++;
+                }
+                else if (c == '.') {
+                    token->type = DIRECTIVE;
+                }
+                break;
+            }
+
+            fprintf(stderr, "Invalid character `%c` in mnemonic.\n", c);
+            return 1;
+    }
+
+    return return_value;
+}
+
+int lex_constant(unit_t *unit, token_t *token)
+{
+    fprintf(stderr, "lex_constant is not yet implemented!\n");
+    return 1;
+}
+
+int lex_id(unit_t *unit, token_t *token)
+{
+    token->type = ID;
+    token->start = unit->i++;
+
+    while (isalnum(unit->src[unit->i])) {
         unit->i++;
-        while (unit->src[unit->i] == '_' || isalnum(unit->src[unit->i])) {
-            unit->i++;
-        }
-
-        if (unit->src[unit->i] == ':') {
-            token->type = LABEL;
-            token->len = unit->i - token->start;
-            unit->i++;
-        }
-    }
-    else if (unit->src[unit->i] == '\0') {
-        return 1;
-    }
-    else {
-        fprintf(stderr, "Invalid character `%c` in mnemonic.\n", unit->src[unit->i]);
-        return 1;
     }
 
+    token->len = unit->i - token->start;
     return 0;
 }
 
@@ -319,7 +355,7 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
         memcpy(buff, unit->src + token.start, token.len);
         buff[token.len] = '\0';
 
-        printf("token: type=%d, text=%s\n", token.type, buff);
+        printf("token: type=`%s`, text=`%s`\n", token_types[token.type], buff);
 
         switch (token.type)
         {
@@ -345,18 +381,37 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                 obj->label_count++;
                 break;
             }
+            case DIRECTIVE:
+            {
+                fprintf(stderr, "Error: unknown pseudo-op: `%s`\n", buff);
+                return 1;
+            }
+            case ENDOFFILE:
+                /* temp */
+                obj->assembly = malloc(exit_assembly_len);
+                memcpy(obj->assembly, exit_assembly, exit_assembly_len);
+                obj->assembly_size = exit_assembly_len;
+                return 0;
             default:
                 free(buff);
                 break;
         }
     }
 
-    /* temp */
-    obj->assembly = malloc(exit_assembly_len);
-    memcpy(obj->assembly, exit_assembly, exit_assembly_len);
-    obj->assembly_size = exit_assembly_len;
+    return 1;
+}
 
-    return 0;
+void skip_comments(unit_t *unit)
+{
+    /* Default assembly one line comments start with a semicolon */
+    if (unit->src[unit->i] == ';'
+        /* for compatibility with the GNU assembler */
+        || (unit->src[unit->i] == '/' && unit->src[unit->i + 1] == '/')
+    ) {
+        do {
+            unit->i++;
+        } while (unit->src[unit->i] != '\n' && unit->src[unit->i] != '\0');
+    }
 }
 
 void usage()
