@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
+#define ALIGNTO8(X) (X + ((8 - (X % 8)) * ((X % 8) != 0)))
 #define OUTFILE_DEFAULT "a.out"
 
 /* enums */
@@ -73,12 +74,6 @@ static int write_file_x86_64(char *outfile, elf64_obj_t *obj);
 /* variables */
 /* temp */
 static const char shstrtab[] = "\0.symtab\0.strtab\0.shstrtab\0.text\0.data\0.bss\0\0\0\0\0";
-static uint8_t exit_assembly[] = {
-    0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00,
-    0x48, 0xC7, 0xC7, 0x00, 0x00, 0x00, 0x00,
-    0x0F, 0x05
-};
-static const size_t exit_assembly_len = 16;
 static const char *token_types[TYPES_COUNT] = {
     "Identifier", "Label", "Directive", "Constant", "Register", "Comma",
     "NewLine", "EndOfFile"
@@ -141,9 +136,10 @@ int assemble_x86_64(char *src, char *outfile)
         .e_ident[EI_ABIVERSION] = 0,
         .e_type = ET_REL, /* Object File | TODO: add executables support later */
         .e_machine = EM_X86_64, .e_version = EV_CURRENT, .e_entry = 0,
-        .e_phoff = 0, .e_shoff = 240 + obj.assembly_size, .e_flags = 0,
-        .e_ehsize = sizeof(Elf64_Ehdr), .e_phentsize = 0, .e_phnum = 0,
-        .e_shentsize = 64, .e_shnum = 7, .e_shstrndx = 6
+        .e_phoff = 0,
+        .e_shoff = 240 + ALIGNTO8(obj.assembly_size),
+        .e_flags = 0, .e_ehsize = sizeof(Elf64_Ehdr), .e_phentsize = 0,
+        .e_phnum = 0, .e_shentsize = 64, .e_shnum = 7, .e_shstrndx = 6
     };
 
     obj.ehdr = &ehdr;
@@ -200,6 +196,10 @@ int default_shdrtabs_x86_64(elf64_obj_t *obj)
     };
     sh_offset += shdr_bss.sh_size;
 
+    /* align the offset to be dividable by 8 bytes */
+    if (sh_offset % 8) {
+        sh_offset += 8 - (sh_offset % 8);
+    }
     shdr_symtab = (Elf64_Shdr){
         .sh_name = 0x01, .sh_type = SHT_SYMTAB, .sh_flags = 0, .sh_addr = 0,
         .sh_offset = sh_offset, .sh_size = sizeof(Elf64_Sym) * 5, .sh_link = 5,
@@ -375,6 +375,24 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
 
         switch (token.type)
         {
+            case ID:
+            {
+                if (!strcmp(buff, "nop")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0x90;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        return 1;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        return 1;
+                    }
+                }
+                free(buff);
+                break;
+            }
             case LABEL:
             {
                 size_t syms_index = obj->section_count + obj->label_count
@@ -387,6 +405,7 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
 
                 if (available) {
                     obj->syms[obj->section_count + available - 1].st_shndx = available;
+                    free(buff);
                 }
                 else {
                     obj->syms = realloc(obj->syms,
@@ -455,11 +474,9 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                 break;
             }
             case ENDOFFILE:
-                /* temp */
-                obj->assembly = malloc(exit_assembly_len);
-                memcpy(obj->assembly, exit_assembly, exit_assembly_len);
-                obj->assembly_size = exit_assembly_len;
+            {
                 return 0;
+            }
             default:
                 free(buff);
                 break;
@@ -504,7 +521,7 @@ int write_file_x86_64(char *outfile, elf64_obj_t *obj)
         strtab_len += strlen(obj->strtab[i]) + 1;
     }
 
-    raw_obj = malloc(sizeof(Elf64_Ehdr) + obj->assembly_size
+    raw_obj = malloc(sizeof(Elf64_Ehdr) + ALIGNTO8(obj->assembly_size)
                      + (sizeof(Elf64_Sym) * syms_count)
                      + strtab_len
                      + sizeof(shstrtab) - 1
@@ -518,6 +535,15 @@ int write_file_x86_64(char *outfile, elf64_obj_t *obj)
         memcpy(raw_obj + raw_obj_len, obj->assembly, obj->assembly_size);
         raw_obj_len += obj->assembly_size;
         free(obj->assembly);
+        int to8;
+        /* align the assembly code */
+        if (obj->assembly_size % 8) {
+            to8 = 8 - (obj->assembly_size % 8);
+            for (int i = 0; i < to8; i++) {
+                raw_obj[raw_obj_len] = 0;
+                raw_obj_len++;
+            }
+        }
     }
 
     for (int i = 0; i < syms_count; i++) {
