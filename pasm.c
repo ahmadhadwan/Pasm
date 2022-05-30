@@ -289,7 +289,10 @@ int lex(unit_t *unit, token_t *token)
 
     switch (c)
     {
-        case '$': return lex_constant(unit, token);
+        case '$':
+            unit->i++;
+            return_value = lex_constant(unit, token);
+            break;
         case '%':
             unit->i++;
             return_value = lex_id(unit, token);
@@ -355,7 +358,20 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
         memcpy(buff, unit->src + token.start, token.len);
         buff[token.len] = '\0';
 
-        printf("token: type=`%s`, text=`%s`\n", token_types[token.type], buff);
+        printf("token: type=%s, text=`", token_types[token.type]);
+        switch (token.type)
+        {
+            case NEWLINE:
+                printf("\\n");
+                break;
+            case ENDOFFILE:
+                printf("\\0");
+                break;
+            default:
+                printf("%s", buff);
+                break;
+        }
+        printf("`\n");
 
         switch (token.type)
         {
