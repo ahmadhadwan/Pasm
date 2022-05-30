@@ -390,6 +390,25 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                         return 1;
                     }
                 }
+                else if (!strcmp(buff, "syscall")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 2);
+                    obj->assembly[obj->assembly_size] = 0x0F;
+                    obj->assembly_size++;
+                    obj->assembly[obj->assembly_size] = 0x05;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        return 1;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        return 1;
+                    }
+                }
+                else {
+                    fprintf(stderr, "Error: unknown instruction: `%s`\n", buff);
+                    return 1;
+                }
                 free(buff);
                 break;
             }
