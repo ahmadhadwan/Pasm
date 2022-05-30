@@ -379,28 +379,80 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
             {
                 size_t syms_index = obj->section_count + obj->label_count
                                   + obj->glabel_count;
-                obj->syms = realloc(obj->syms,
-                                    (syms_index + 1) * sizeof(Elf64_Sym));
-                obj->syms[syms_index] = (Elf64_Sym){
-                    .st_name = 0x01,
-                    .st_info = ELF64_ST_INFO(STB_LOCAL, STT_NOTYPE),
-                    .st_other = STV_DEFAULT, .st_shndx = obj->label_count + 1,
-                    .st_value = 0, .st_size = 0
-                };
+                size_t available = 0;
+                for (int i = 0; i < obj->label_count + obj->glabel_count; i++) {
+                    if (!strcmp(buff, obj->strtab[i]))
+                        available = i + 1;
+                }
 
-                obj->strtab = realloc(obj->strtab,
-                                     (obj->strtab_count + 1) * sizeof(char *));
-                obj->strtab[obj->strtab_count] = buff;
-                obj->strtab[obj->strtab_count] = buff;
+                if (available) {
+                    obj->syms[obj->section_count + available - 1].st_shndx = available;
+                }
+                else {
+                    obj->syms = realloc(obj->syms,
+                                        (syms_index + 1) * sizeof(Elf64_Sym));
+                    obj->syms[syms_index] = (Elf64_Sym){
+                        .st_name = 0x01,
+                        .st_info = ELF64_ST_INFO(STB_LOCAL, STT_NOTYPE),
+                        .st_other = STV_DEFAULT, .st_shndx = obj->label_count + 1,
+                        .st_value = 0, .st_size = 0
+                    };
 
-                obj->strtab_count++;
-                obj->label_count++;
+                    obj->strtab = realloc(obj->strtab,
+                                         (obj->strtab_count + 1) * sizeof(char *));
+                    obj->strtab[obj->strtab_count] = buff;
+
+                    obj->strtab_count++;
+                    obj->label_count++;
+                }
                 break;
             }
             case DIRECTIVE:
             {
-                fprintf(stderr, "Error: unknown pseudo-op: `%s`\n", buff);
-                return 1;
+                size_t syms_index = obj->section_count + obj->label_count
+                                  + obj->glabel_count;
+                if (!strcmp(buff, ".globl")) {
+                    free(buff);
+                    if (lex(unit, &token)) {
+                        return 1;
+                    }
+                    if (token.type != ID) {
+                        fprintf(stderr, "Error: .globl directive expected a symbol.\n");
+                        return 1;
+                    }
+
+                    buff = malloc(token.len + 1);
+                    memcpy(buff, unit->src + token.start, token.len);
+                    buff[token.len] = '\0';
+
+                    if (lex(unit, &token)) {
+                        return 1;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        fprintf(stderr, "Error: junk at end of line after .globl.\n");
+                        return 1;
+                    }
+
+                    obj->syms = realloc(obj->syms,
+                                        (syms_index + 1) * sizeof(Elf64_Sym));
+                    obj->syms[syms_index] = (Elf64_Sym){
+                        .st_name = 0x01,
+                        .st_info = ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE),
+                        .st_other = STV_DEFAULT, .st_shndx = 0, .st_value = 0,
+                        .st_size = 0
+                    };
+                    obj->strtab = realloc(obj->strtab,
+                                         (obj->strtab_count + 1) * sizeof(char *));
+                    obj->strtab[obj->strtab_count] = buff;
+
+                    obj->strtab_count++;
+                    obj->glabel_count++;
+                }
+                else {
+                    fprintf(stderr, "Error: unknown pseudo-op: `%s`\n", buff);
+                    return 1;
+                }
+                break;
             }
             case ENDOFFILE:
                 /* temp */
