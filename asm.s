@@ -5,4 +5,4 @@ _start:
     leave
     ret
     syscall
-    nop
+    NOP

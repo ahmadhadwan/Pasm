@@ -377,6 +377,10 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
         {
             case ID:
             {
+                for (char *p = buff; *p; ++p) {
+                    *p = tolower(*p);
+                }
+
                 if (!strcmp(buff, "leave") || !strcmp(buff, "leaveq")) {
                     obj->assembly = realloc(obj->assembly,
                                             obj->assembly_size + 1);
