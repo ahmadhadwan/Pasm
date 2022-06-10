@@ -390,6 +390,19 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                         goto FREE_BUFF_ERROR;
                     }
                 }
+                else if (!strcmp(buff, "ret")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0xC3;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                }
                 else if (!strcmp(buff, "syscall")) {
                     obj->assembly = realloc(obj->assembly,
                                             obj->assembly_size + 2);
