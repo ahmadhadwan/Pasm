@@ -72,8 +72,6 @@ static void usage();
 static int write_file_x86_64(char *outfile, elf64_obj_t *obj);
 
 /* variables */
-/* temp */
-static const char shstrtab[] = "\0.symtab\0.strtab\0.shstrtab\0.text\0.data\0.bss\0\0\0\0\0";
 static const char *token_types[TYPES_COUNT] = {
     "Identifier", "Label", "Directive", "Constant", "Register", "Comma",
     "NewLine", "EndOfFile"
@@ -167,7 +165,7 @@ int default_shdrtabs_x86_64(elf64_obj_t *obj)
 {
     Elf64_Shdr shdr_null, shdr_text, shdr_data, shdr_bss,
                shdr_symtab, shdr_strtab, shdr_shstrtab;
-    size_t sh_offset, strtab_len;
+    size_t sh_offset, strtab_len, shstrtab_len;
     sh_offset = sizeof(Elf64_Ehdr);
 
     shdr_null = (Elf64_Shdr){};
@@ -220,11 +218,39 @@ int default_shdrtabs_x86_64(elf64_obj_t *obj)
     };
     sh_offset += shdr_strtab.sh_size;
 
+    /* temp */
+    /* default shstrtab */
+    obj->shstrtab_count = 6;
+    obj->shstrtab = malloc(obj->shstrtab_count * sizeof(char *));
+    
+    obj->shstrtab[0] = malloc(strlen(".symtab") + 1);
+    strcpy(obj->shstrtab[0], ".symtab");
+    
+    obj->shstrtab[1] = malloc(strlen(".strtab") + 1);
+    strcpy(obj->shstrtab[1], ".strtab");
+
+    obj->shstrtab[2] = malloc(strlen(".shstrtab") + 1);
+    strcpy(obj->shstrtab[2], ".shstrtab");
+
+    obj->shstrtab[3] = malloc(strlen(".text") + 1);
+    strcpy(obj->shstrtab[3], ".text");
+
+    obj->shstrtab[4] = malloc(strlen(".data") + 1);
+    strcpy(obj->shstrtab[4], ".data");
+    
+    obj->shstrtab[5] = malloc(strlen(".bss") + 1);
+    strcpy(obj->shstrtab[5], ".bss");
+
+    shstrtab_len = 1;
+    for (int i = 0; i < obj->shstrtab_count; i++) {
+        shstrtab_len += strlen(obj->shstrtab[i]) + 1;
+    }
+
     shdr_shstrtab = (Elf64_Shdr){
         .sh_name = 0x11, .sh_type = SHT_STRTAB, .sh_flags = 0,
         .sh_addr = 0, .sh_offset = sh_offset,
-        .sh_size = sizeof(shstrtab) - 1 -4/* the padded zeros */,
-        .sh_link = 0, .sh_info = 0, .sh_addralign = 1, .sh_entsize = 0
+        .sh_size = shstrtab_len, .sh_link = 0, .sh_info = 0,
+        .sh_addralign = 1, .sh_entsize = 0
     };
     sh_offset += shdr_shstrtab.sh_size;
 
@@ -643,20 +669,26 @@ void usage()
 int write_file_x86_64(char *outfile, elf64_obj_t *obj)
 {
     uint8_t *raw_obj;
-    size_t raw_obj_len, syms_count, strtab_len;
+    size_t raw_obj_len, syms_count, strtab_len, shstrtab_len;
     FILE *fd;
+    int to8;
 
     syms_count = obj->section_count + obj->label_count + obj->glabel_count;
+    to8 = 0;
 
     strtab_len = 1; /* first zero */
     for (int i = 0; i < obj->strtab_count; i++) {
         strtab_len += strlen(obj->strtab[i]) + 1;
     }
 
+    shstrtab_len = 1; /* first zero */
+    for (int i = 0; i < obj->shstrtab_count; i++) {
+        shstrtab_len += strlen(obj->shstrtab[i]) + 1;
+    }
+
     raw_obj = malloc(sizeof(Elf64_Ehdr) + ALIGNTO8(obj->assembly_size)
                      + (sizeof(Elf64_Sym) * syms_count)
-                     + strtab_len
-                     + sizeof(shstrtab) - 1
+                     + strtab_len + shstrtab_len
                      + (sizeof(Elf64_Shdr) * obj->shdr_count)
     );
     raw_obj_len = 0;
@@ -667,7 +699,6 @@ int write_file_x86_64(char *outfile, elf64_obj_t *obj)
         memcpy(raw_obj + raw_obj_len, obj->assembly, obj->assembly_size);
         raw_obj_len += obj->assembly_size;
         free(obj->assembly);
-        int to8;
         /* align the assembly code */
         if (obj->assembly_size % 8) {
             to8 = 8 - (obj->assembly_size % 8);
@@ -690,9 +721,22 @@ int write_file_x86_64(char *outfile, elf64_obj_t *obj)
         memcpy(raw_obj + raw_obj_len, obj->strtab[i], current_str_len);
         raw_obj_len += current_str_len;
     }
-
-    memcpy(raw_obj + raw_obj_len, shstrtab, sizeof(shstrtab) - 1);
-    raw_obj_len += sizeof(shstrtab) - 1;
+    
+    raw_obj[raw_obj_len] = '\0';
+    raw_obj_len++;
+    for (int i = 0; i < obj->shstrtab_count; i++) {
+        size_t current_str_len = strlen(obj->shstrtab[i]) + 1;
+        memcpy(raw_obj + raw_obj_len, obj->shstrtab[i], current_str_len);
+        raw_obj_len += current_str_len;
+    }
+    /* align the assembly code */
+    if (obj->assembly_size % 8) {
+        to8 = 8 - (obj->assembly_size % 8) - 1;
+        for (int i = 0; i < to8; i++) {
+            raw_obj[raw_obj_len] = 0;
+            raw_obj_len++;
+        }
+    }
 
     for (int i = 0; i < obj->shdr_count; i++) {
         memcpy(raw_obj + raw_obj_len, &(obj->shdrs[i]), sizeof(Elf64_Shdr));
