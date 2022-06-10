@@ -384,10 +384,10 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                     obj->assembly_size++;
 
                     if (lex(unit, &token)) {
-                        return 1;
+                        goto FREE_BUFF_ERROR;
                     }
                     if (token.type != NEWLINE && token.type != ENDOFFILE) {
-                        return 1;
+                        goto FREE_BUFF_ERROR;
                     }
                 }
                 else if (!strcmp(buff, "syscall")) {
@@ -399,15 +399,15 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                     obj->assembly_size++;
 
                     if (lex(unit, &token)) {
-                        return 1;
+                        goto FREE_BUFF_ERROR;
                     }
                     if (token.type != NEWLINE && token.type != ENDOFFILE) {
-                        return 1;
+                        goto FREE_BUFF_ERROR;
                     }
                 }
                 else {
                     fprintf(stderr, "Error: unknown instruction: `%s`\n", buff);
-                    return 1;
+                    goto FREE_BUFF_ERROR;
                 }
                 free(buff);
                 break;
@@ -488,12 +488,13 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                 }
                 else {
                     fprintf(stderr, "Error: unknown pseudo-op: `%s`\n", buff);
-                    return 1;
+                    goto FREE_BUFF_ERROR;
                 }
                 break;
             }
             case ENDOFFILE:
             {
+                free(buff);
                 return 0;
             }
             default:
@@ -502,6 +503,10 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
         }
     }
 
+    return 1;
+
+FREE_BUFF_ERROR:
+    free(buff);
     return 1;
 }
 
