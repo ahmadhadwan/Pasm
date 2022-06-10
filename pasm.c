@@ -377,7 +377,20 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
         {
             case ID:
             {
-                if (!strcmp(buff, "nop")) {
+                if (!strcmp(buff, "leave") || !strcmp(buff, "leaveq")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0xC9;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                }
+                else if (!strcmp(buff, "nop")) {
                     obj->assembly = realloc(obj->assembly,
                                             obj->assembly_size + 1);
                     obj->assembly[obj->assembly_size] = 0x90;
@@ -390,7 +403,7 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                         goto FREE_BUFF_ERROR;
                     }
                 }
-                else if (!strcmp(buff, "ret")) {
+                else if (!strcmp(buff, "ret") || !strcmp(buff, "retq")) {
                     obj->assembly = realloc(obj->assembly,
                                             obj->assembly_size + 1);
                     obj->assembly[obj->assembly_size] = 0xC3;
