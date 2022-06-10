@@ -381,7 +381,85 @@ int parse_x86_64(unit_t *unit, elf64_obj_t *obj)
                     *p = tolower(*p);
                 }
 
-                if (!strcmp(buff, "leave") || !strcmp(buff, "leaveq")) {
+                if (!strcmp(buff, "clc")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0xF8;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                }
+                else if (!strcmp(buff, "stc")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0xF9;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                }
+                else if (!strcmp(buff, "cli")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0xFA;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                }
+                else if (!strcmp(buff, "sti")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0xFB;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                }
+                else if (!strcmp(buff, "cld")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0xFC;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                }
+                else if (!strcmp(buff, "std")) {
+                    obj->assembly = realloc(obj->assembly,
+                                            obj->assembly_size + 1);
+                    obj->assembly[obj->assembly_size] = 0xFD;
+                    obj->assembly_size++;
+
+                    if (lex(unit, &token)) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                    if (token.type != NEWLINE && token.type != ENDOFFILE) {
+                        goto FREE_BUFF_ERROR;
+                    }
+                }
+                else if (!strcmp(buff, "leave") || !strcmp(buff, "leaveq")) {
                     obj->assembly = realloc(obj->assembly,
                                             obj->assembly_size + 1);
                     obj->assembly[obj->assembly_size] = 0xC9;

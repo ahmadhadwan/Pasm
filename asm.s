@@ -5,4 +5,11 @@ _start:
     leave
     ret
     syscall
-    NOP
+    nop
+
+    clc
+    stc
+    cli
+    sti
+    cld
+    std
